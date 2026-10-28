@@ -24,7 +24,8 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-api-session-controller"
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
     }
