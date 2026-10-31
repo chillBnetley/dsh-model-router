@@ -103,16 +103,19 @@ A user-selected override steers the whole turn, independent of the task type:
   escalate to **Grok** for reasoning.
 
 Mode is per-session. The composer's ⚡ 工作 / 闲聊 toggle (in the model-selector
-row) writes it; `/mode` (or `/mode work|chat`) shows or sets it. Three sources
+row) writes it; `/mode` (or `/mode work|chat`) shows or sets it. Two sources
 keep it reliable, in precedence order:
 
 1. **`data/modes.json`** — the plugin's own map, written by `/mode` and read by
    the router on every turn. This is the source routing trusts, so a switch
    applies on the very next turn and survives a restart.
-2. **the `model-router/mode` session event** — appended by `/mode` as the
-   semantic record in the session log, and read back for a session whose mode
-   predates the state file.
-3. **`defaultMode`** — the value a session uses before it has ever been toggled.
+2. **`defaultMode`** — the value a session uses before it has ever been toggled.
+
+Older versions also appended a `model-router/mode` session event. That write is
+gone: a downstream event type outside the harness vocabulary must carry the
+envelope's `ignorable` marker to be readable, and a live append cannot set it, so
+the event made the session log unreadable after a restart. Existing logs that
+still contain the event are read as a fallback and never written again.
 
 `stateFile` overrides where that map lives (the tests point it at a temp file),
 and `chat.preferred.id` names the free model chat mode prefers first.

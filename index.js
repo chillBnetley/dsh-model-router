@@ -45,12 +45,14 @@ const CANDIDATE_TTL_MS = 60_000
 /**
  * The plugin's own durable copy of the per-session mode.
  *
- * The session log is the semantic home of this fact (the /mode command appends a
- * `model-router/mode` event there too), but reading it back depends on resolving
- * the live session for the turn, and that resolution can silently miss — which is
- * exactly how the first cut of this feature ended up never leaving `work` while
- * its diagnostics still looked healthy. This file is the source the router trusts,
- * so a mode switch survives a restart without that dependency.
+ * The state file is the source the router trusts: resolving the live session at
+ * route time can silently miss, which is exactly how the first cut of this
+ * feature ended up never leaving `work` while its diagnostics still looked
+ * healthy. The /mode command no longer appends a `model-router/mode` session
+ * event: a downstream event type outside the harness vocabulary must carry the
+ * envelope's `ignorable` marker to be readable, and a live append cannot set
+ * that marker, so such an event made the whole session log unreadable after a
+ * restart.
  */
 const MODES_FILE = new URL('./data/modes.json', import.meta.url)
 
@@ -253,8 +255,8 @@ export function apply(ctx, rawConfig = {}) {
   //    router reads first, so a toggle takes effect on the very next turn;
   //  * `data/modes.json` — the same map persisted, so a toggle survives a restart
   //    without depending on a session lookup at route time;
-  //  * the `model-router/mode` session event — the semantic record, read as a
-  //    fallback for a session whose mode was set before this file existed.
+  //  * legacy `model-router/mode` session events from older versions are still
+  //    read as a fallback; they are never written again (see MODES_FILE).
   const modesPath = modesStorePath(config)
   const modeBySession = loadModes(modesPath)
   const services = { sessions: null, agents: null }
@@ -454,17 +456,14 @@ export function apply(ctx, rawConfig = {}) {
           if (mode !== 'work' && mode !== 'chat') {
             return { kind: 'error', text: `unknown mode "${mode}" (use work or chat)` }
           }
-          // The live map is what routing reads; the file makes it survive a
-          // restart; the session event is the semantic record. Write the map
-          // first, so the switch applies even if the append is refused.
+          // The live map is what routing reads, and the file makes it survive a
+          // restart; nothing else has to be recorded.
           if (typeof sessionId === 'string') { modeBySession.set(sessionId, mode); saveModes(modesPath, modeBySession) }
-          let appended = false
-          try { agent?.session?.append(MODE_EVENT, { mode }); appended = true } catch (error) { note(`MODE APPEND FAILED ${error?.message ?? error}`) }
-          // Read the event straight back: this separates "the append did not land"
-          // from "routing could not reach the session", which look identical from
-          // the outside (both leave the mode at its default).
-          const readBack = modeOf(agent?.session, 'MISS')
-          note(`MODE set ${mode} session=${sessionId ?? '-'} cached=true appended=${appended} readBack=${readBack}`)
+          // Do NOT append a custom session event here: the read path refuses a
+          // log containing an unknown event type unless the envelope carries
+          // `ignorable`, and a live append cannot set that marker, so the event
+          // would make the session unreadable after a restart.
+          note(`MODE set ${mode} session=${sessionId ?? '-'} cached=true`)
           return { kind: 'success', text: `model-router mode: ${mode}` }
         },
       })

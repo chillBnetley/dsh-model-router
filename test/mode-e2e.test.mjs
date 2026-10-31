@@ -8,7 +8,7 @@
 // makes this test able to catch that class of bug.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -148,10 +148,13 @@ test('toggling back to work restores the previous behaviour', async () => {
 })
 
 test('the toggle is written where a restart can find it', async () => {
-  const { session } = await boot()
+  const stateFile = freshState()
+  const { session } = await boot({ stateFile })
   toggle(session, 'chat')
-  const chat = session.events.find(e => e.type === 'model-router/mode')
-  assert.equal(chat?.data?.mode, 'chat', 'the toggle must write a durable session event')
+  const saved = JSON.parse(readFileSync(stateFile, 'utf8'))
+  assert.equal(saved[session.id], 'chat', 'the toggle must write the durable state file')
+  assert.equal(session.events.some(e => e.type === 'model-router/mode'), false,
+    'the toggle must not append a non-ignorable session event')
 })
 
 test('a restart restores the mode from the plugin state file alone', async () => {
@@ -166,15 +169,14 @@ test('a restart restores the mode from the plugin state file alone', async () =>
     `the state file must restore the mode, got ${JSON.stringify(served)}`)
 })
 
-test('with no state file, a restart still restores the mode from the session log', async () => {
+test('a session log from an older writer still restores the mode', async () => {
   const first = await boot()
-  toggle(first.session, 'chat')
+  // Simulate an older version, which appended the event itself.
+  first.session.append('model-router/mode', { mode: 'chat' })
 
-  // A different state file and a seeded session: the only surviving source is the
-  // session event, which is the semantic home of this fact.
   const second = await boot({ stateFile: freshState(), sessionId: first.session.id, seed: first.session.events })
   served.length = 0
   await drain(ask(second.runtime, second.session.id))
   assert.deepEqual(served, ['opencode/space-bunny-free'],
-    `the session log must restore the mode, got ${JSON.stringify(served)}`)
+    `the legacy session event must still restore the mode, got ${JSON.stringify(served)}`)
 })
